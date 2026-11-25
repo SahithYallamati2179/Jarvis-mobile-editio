@@ -1,0 +1,5 @@
+<button id="send">SEND</button>button>
+<button id="mic-btn">🎙️</buton>
+  <button id="clear-btn">🧹</button>button>
+  <button id="cam-btn">📸</button>button>
+  <input type="file" id="img-input" accept="image/*" capture="environment" style="display:none">
