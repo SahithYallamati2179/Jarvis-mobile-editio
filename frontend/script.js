@@ -483,3 +483,72 @@ function add(text, who) {
 
     return div;
 }
+/* ==========================================
+   14. SYSTEM STATUS MONITOR
+========================================== */
+
+function updateStatus(id, active, text) {
+
+    const element = document.getElementById(id);
+
+    if (!element) return;
+
+    element.className = active ? 'on' : 'off';
+
+    element.innerText = active
+        ? '● ' + text
+        : '● ' + text;
+}
+
+
+// AI CORE
+updateStatus('ai-status', !!API_KEY, API_KEY ? 'READY' : 'NO KEY');
+
+
+// NETWORK
+updateStatus('network-status', navigator.onLine, navigator.onLine ? 'ONLINE' : 'OFFLINE');
+
+
+// VOICE
+const voiceInputAvailable =
+    !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+
+const voiceOutputAvailable =
+    !!window.speechSynthesis;
+
+const voiceAvailable =
+    voiceInputAvailable && voiceOutputAvailable;
+
+updateStatus(
+    'voice-status',
+    voiceAvailable,
+    voiceAvailable ? 'ONLINE' : 'PARTIAL / OFFLINE'
+);
+
+
+// MEMORY
+let memoryAvailable = false;
+
+try {
+    localStorage.setItem('jarvis_test', '1');
+    localStorage.removeItem('jarvis_test');
+    memoryAvailable = true;
+} catch (e) {
+    memoryAvailable = false;
+}
+
+updateStatus(
+    'memory-status',
+    memoryAvailable,
+    memoryAvailable ? 'ONLINE' : 'OFFLINE'
+);
+
+
+// NETWORK CHANGES
+window.addEventListener('online', () => {
+    updateStatus('network-status', true, 'ONLINE');
+});
+
+window.addEventListener('offline', () => {
+    updateStatus('network-status', false, 'OFFLINE');
+});
