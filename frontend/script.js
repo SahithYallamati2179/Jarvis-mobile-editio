@@ -1,22 +1,24 @@
 /* ==========================================
-   1. API KEY & MODEL CONFIGURATION
+   1. API KEY & MODEL CONFIGURATION (GROQ)
 ========================================== */
 
-let API_KEY = localStorage.getItem('jarvis_key');
+let API_KEY = localStorage.getItem('jarvis_groq_key');
 
 if (!API_KEY) {
-    API_KEY = prompt('Enter your Gemini API Key:');
-
-    if (API_KEY) {
-        localStorage.setItem('jarvis_key', API_KEY);
-    }
+    API_KEY = prompt('Enter your Groq API Key:');
+    if (API_KEY) localStorage.setItem('jarvis_groq_key', API_KEY);
 }
 
-const MODELS = [
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
-    "gemini-flash-latest"
+// Text models: fallback is attempted if a model is unavailable.
+const TEXT_MODELS = [
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b"
 ];
+
+// Vision model (supports image input).
+const VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
+
+const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 
 /* ==========================================
@@ -67,56 +69,56 @@ MEMORY.forEach(m => {
 
 
 /* ==========================================
-   5. GEMINI BRAIN
+   5. GROQ BRAIN
 ========================================== */
 
-async function callGemini(promptText) {
+async function callGroq(promptText) {
 
-    const contents = MEMORY.slice(-12).map(m => ({
-        role: m.role,
-        parts: [{ text: m.text }]
+    const messages = MEMORY.slice(-12).map(m => ({
+        role: m.role === 'model' ? 'assistant' : m.role,
+        content: m.text
     }));
 
-    contents.push({
+    messages.push({
         role: 'user',
-        parts: [{ text: promptText }]
+        content: promptText
     });
 
     let lastErr;
 
-    for (const model of MODELS) {
+    for (const model of TEXT_MODELS) {
 
         try {
 
-            const res = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${API_KEY}`,
-                {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        contents: contents
-                    })
-                }
-            );
+            const res = await fetch(GROQ_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${API_KEY}`
+                },
+                body: JSON.stringify({
+                    model,
+                    messages,
+                    temperature: 0.7
+                })
+            });
 
             const data = await res.json();
 
-            if (!res.ok || data.error) {
+            if (!res.ok) {
 
                 const message =
                     data.error?.message || `HTTP ${res.status}`;
 
                 lastErr = new Error(message);
 
-                // Try the next model only for model availability
-                // or temporary server / rate-limit errors.
+                // Retry the next model for model-related
+                // or temporary failures.
                 if (
                     res.status === 429 ||
                     res.status === 503 ||
                     res.status === 500 ||
-                    /high demand|temporar|quota|rate|unavailable|deprecated/i.test(message)
+                    /model|temporar|rate|limit|unavailable|decommission/i.test(message)
                 ) {
                     continue;
                 }
@@ -124,12 +126,10 @@ async function callGemini(promptText) {
                 throw lastErr;
             }
 
-            const reply = data.candidates?.[0]?.content?.parts
-                ?.map(part => part.text || '')
-                .join('');
+            const reply = data.choices?.[0]?.message?.content;
 
             if (!reply) {
-                throw new Error('Gemini returned an empty response.');
+                throw new Error('Groq returned an empty response.');
             }
 
             return reply;
@@ -139,7 +139,7 @@ async function callGemini(promptText) {
         }
     }
 
-    throw lastErr || new Error('All Gemini models failed.');
+    throw lastErr || new Error('All Groq text models failed.');
 }
 
 
@@ -147,7 +147,7 @@ async function callGemini(promptText) {
    6. ASK J.A.R.V.I.S.
 ========================================== */
 
-async function askGemini(promptText) {
+async function askGroq(promptText) {
 
     const thinkingMsg = add(
         'J.A.R.V.I.S: Thinking...',
@@ -156,7 +156,7 @@ async function askGemini(promptText) {
 
     try {
 
-        const reply = await callGemini(promptText);
+        const reply = await callGroq(promptText);
 
         MEMORY.push({
             role: 'user',
@@ -184,7 +184,7 @@ async function askGemini(promptText) {
 
 
 /* ==========================================
-   7. IMAGE / VISION ENGINE
+   7. IMAGE / VISION ENGINE (GROQ)
 ========================================== */
 
 if (camBtn && imgInput) {
@@ -233,79 +233,55 @@ async function askVision(base64, mime, question) {
         'ai'
     );
 
-    let lastErr;
+    try {
 
-    for (const model of MODELS) {
+        const res = await fetch(GROQ_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${API_KEY}`
+            },
+            body: JSON.stringify({
+                model: VISION_MODEL,
+                messages: [{
+                    role: 'user',
+                    content: [
+                        { type: 'text', text: question },
+                        {
+                            type: 'image_url',
+                            image_url: {
+                                url: `data:${mime};base64,${base64}`
+                            }
+                        }
+                    ]
+                }]
+            })
+        });
 
-        try {
+        const data = await res.json();
 
-            const res = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${API_KEY}`,
-                {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        contents: [{
-                            role: 'user',
-                            parts: [
-                                { text: question },
-                                {
-                                    inline_data: {
-                                        mime_type: mime,
-                                        data: base64
-                                    }
-                                }
-                            ]
-                        }]
-                    })
-                }
+        if (!res.ok) {
+            throw new Error(
+                data.error?.message || `HTTP ${res.status}`
             );
-
-            const data = await res.json();
-
-            if (!res.ok || data.error) {
-
-                const message =
-                    data.error?.message || `HTTP ${res.status}`;
-
-                lastErr = new Error(message);
-
-                if (
-                    res.status === 429 ||
-                    res.status === 503 ||
-                    res.status === 500 ||
-                    /high demand|temporar|quota|rate|unavailable|deprecated/i.test(message)
-                ) {
-                    continue;
-                }
-
-                throw lastErr;
-            }
-
-            const reply = data.candidates?.[0]?.content?.parts
-                ?.map(part => part.text || '')
-                .join('');
-
-            if (!reply) {
-                throw new Error('Gemini returned an empty response.');
-            }
-
-            thinkingMsg.innerText = 'J.A.R.V.I.S: ' + reply;
-
-            speak(reply);
-
-            return;
-
-        } catch (e) {
-            lastErr = e;
         }
-    }
 
-    thinkingMsg.innerText =
-        'J.A.R.V.I.S: ERROR - ' +
-        (lastErr?.message || 'Image analysis failed.');
+        const reply = data.choices?.[0]?.message?.content;
+
+        if (!reply) {
+            throw new Error('Groq returned an empty image response.');
+        }
+
+        thinkingMsg.innerText = 'J.A.R.V.I.S: ' + reply;
+
+        speak(reply);
+
+    } catch (e) {
+
+        thinkingMsg.innerText =
+            'J.A.R.V.I.S: ERROR - ' + e.message;
+
+    }
 }
 
 
@@ -331,7 +307,8 @@ if (SR && micBtn) {
 
         add('YOU: ' + text, 'user');
 
-        askGemini(text);
+        askGroq(text);
+
     };
 
     rec.onerror = (e) => {
@@ -415,7 +392,8 @@ if (sendBtn && input) {
 
         input.value = '';
 
-        askGemini(text);
+        askGroq(text);
+
     };
 
 }
@@ -483,6 +461,8 @@ function add(text, who) {
 
     return div;
 }
+
+
 /* ==========================================
    14. SYSTEM STATUS MONITOR
 ========================================== */
@@ -506,7 +486,11 @@ updateStatus('ai-status', !!API_KEY, API_KEY ? 'READY' : 'NO KEY');
 
 
 // NETWORK
-updateStatus('network-status', navigator.onLine, navigator.onLine ? 'ONLINE' : 'OFFLINE');
+updateStatus(
+    'network-status',
+    navigator.onLine,
+    navigator.onLine ? 'ONLINE' : 'OFFLINE'
+);
 
 
 // VOICE
